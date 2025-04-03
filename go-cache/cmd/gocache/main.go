@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/AdrianWangs/go-cache/go_cache"
-	"github.com/AdrianWangs/go-cache/interfaces"
+	"github.com/AdrianWangs/go-cache/internal/cache"
+	"github.com/AdrianWangs/go-cache/internal/interfaces"
+	"github.com/AdrianWangs/go-cache/internal/server"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
-	"github.com/AdrianWangs/go-cache/server"
 )
 
 var db = map[string]string{
@@ -17,8 +17,8 @@ var db = map[string]string{
 	"Sam":  "567",
 }
 
-func createGroup() *go_cache.Group {
-	return go_cache.NewGroup("scores", 2<<10, interfaces.GetterFunc(
+func createGroup() *cache.Group {
+	return cache.NewGroup("scores", 2<<10, interfaces.GetterFunc(
 		func(key string) ([]byte, error) {
 			logger.Debugf("[SlowDB] search key %s", key)
 			if v, ok := db[key]; ok {
@@ -30,7 +30,7 @@ func createGroup() *go_cache.Group {
 }
 
 // 启动缓存服务器: 创建HTTPPool, 添加节点, 注册到gocache中
-func startCacheServer(addr string, addrs []string, gocache *go_cache.Group) {
+func startCacheServer(addr string, addrs []string, gocache *cache.Group) {
 	peers := server.NewHTTPPool(addr)
 	peers.Set(addrs...)
 	gocache.RegisterPeers(peers)
@@ -39,7 +39,7 @@ func startCacheServer(addr string, addrs []string, gocache *go_cache.Group) {
 }
 
 // 启动API服务器: 创建HTTPPool, 添加节点, 注册到gocache中
-func startAPIServer(apiAddr string, gocache *go_cache.Group) {
+func startAPIServer(apiAddr string, gocache *cache.Group) {
 	http.Handle("/api", http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 
@@ -59,15 +59,18 @@ func startAPIServer(apiAddr string, gocache *go_cache.Group) {
 }
 
 func main() {
-	// 初始化日志
-	logger.InitLogger("info")
-
 	var port int
 	var api bool
+	var logLevel string
 
 	flag.IntVar(&port, "port", 8001, "GoCache server port")
 	flag.BoolVar(&api, "api", false, "Start API server?")
+	flag.StringVar(&logLevel, "log", "info", "Log level (debug/info/warn/error)")
 	flag.Parse()
+
+	// 初始化日志
+	logger.InitLogger(logLevel)
+	logger.Infof("Starting with log level: %s", logLevel)
 
 	apiAddr := "http://localhost:9999"
 	addrMap := map[int]string{

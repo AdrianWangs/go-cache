@@ -1,11 +1,11 @@
-package go_cache
+package cache
 
 import (
 	"fmt"
 	"sync"
 
-	"github.com/AdrianWangs/go-cache/interfaces"
-	"github.com/AdrianWangs/go-cache/peers"
+	"github.com/AdrianWangs/go-cache/internal/interfaces"
+	"github.com/AdrianWangs/go-cache/internal/peers"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
 )
 

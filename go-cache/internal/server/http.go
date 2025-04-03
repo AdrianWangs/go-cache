@@ -6,9 +6,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/AdrianWangs/go-cache/consistenthash"
-	"github.com/AdrianWangs/go-cache/go_cache"
-	"github.com/AdrianWangs/go-cache/peers"
+	"github.com/AdrianWangs/go-cache/internal/cache"
+	"github.com/AdrianWangs/go-cache/internal/consistenthash"
+	"github.com/AdrianWangs/go-cache/internal/peers"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
 )
 
@@ -78,7 +78,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key := parts[1]
 
 	// 尝试获取group
-	group := go_cache.GetGroup(groupName)
+	group := cache.GetGroup(groupName)
 	if group == nil {
 		logger.Warnf("no such group: %s", groupName)
 		http.Error(w, "no such group: "+groupName, http.StatusNotFound)
