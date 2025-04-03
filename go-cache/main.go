@@ -60,7 +60,7 @@ func startAPIServer(apiAddr string, gocache *cache.Group) {
 
 func main() {
 	// 初始化日志
-	logger.InitLogger("debug")
+	logger.InitLogger("info")
 
 	var port int
 	var api bool

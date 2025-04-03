@@ -6,6 +6,7 @@ import (
 
 	"github.com/AdrianWangs/go-cache/internal/interfaces"
 	"github.com/AdrianWangs/go-cache/internal/peers"
+	"github.com/AdrianWangs/go-cache/internal/singleflight"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
 )
 
@@ -15,6 +16,8 @@ type Group struct {
 	getter    interfaces.Getter // 缓存未命中时获取源数据的回调
 	mainCache cache             // 并发缓存
 	peers     peers.PeerPicker  // 节点选择器
+
+	loader *singleflight.Group // 用于管理不同key的请求(call),同一时间进来的请求不需要重复执行
 }
 
 var (
@@ -41,6 +44,7 @@ func NewGroup(name string, cacheBytes int64, getter interfaces.Getter) *Group {
 		name:      name,
 		getter:    getter,
 		mainCache: cache{cacheBytes: cacheBytes},
+		loader:    &singleflight.Group{},
 	}
 	groups[name] = g
 	logger.Infof("Create cache group: %s, size: %d bytes", name, cacheBytes)
@@ -96,19 +100,24 @@ func (g *Group) Get(key string) (ByteView, error) {
 func (g *Group) load(key string) (value ByteView, err error) {
 	logger.Info("[load] 缓存未命中，开始加载缓存")
 
-	// 尝试从远程节点获取数据
-	if g.peers != nil {
-		// 选择一个节点，这个节点负责这个key的缓存
-		if peer, ok := g.peers.PickPeer(key); ok {
-			if value, err = g.getFromPeer(peer, key); err == nil {
-				return value, nil
+	viewi, err := g.loader.Do(key, func() (interface{}, error) {
+		// 尝试从远程节点获取数据
+		if g.peers != nil {
+			// 选择一个节点，这个节点负责这个key的缓存
+			if peer, ok := g.peers.PickPeer(key); ok {
+				if value, err = g.getFromPeer(peer, key); err == nil {
+					return value, nil
+				}
+				logger.Errorf("[GoCache] Failed to get from peer: %v", err)
 			}
-			logger.Errorf("[GoCache] Failed to get from peer: %v", err)
 		}
+		// 如果远程节点获取数据失败, 则从本地获取数据
+		return g.getLocally(key)
+	})
+	if err != nil {
+		return ByteView{}, err
 	}
-
-	// 最后才尝试从缓存中获取数据
-	return g.getLocally(key)
+	return viewi.(ByteView), nil
 }
 
 // getLocally 调用回调函数获取源数据
