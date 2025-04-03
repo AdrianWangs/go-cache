@@ -82,6 +82,7 @@ func (g *Group) Get(key string) (ByteView, error) {
 		return v, nil
 	}
 
+	// 缓存未命中，开始加载缓存,加载缓存会优先从远程节点获取数据，如果远程节点没有数据，则从本地获取数据
 	return g.load(key)
 }
 
@@ -101,6 +102,7 @@ func (g *Group) load(key string) (value ByteView, err error) {
 		// 选择一个节点，这个节点负责这个key的缓存
 		if peer, ok := g.peers.PickPeer(key); ok {
 			if value, err = g.getFromPeer(peer, key); err == nil {
+				logger.Debugf("[load] 从远程节点获取数据成功: %s", key)
 				return value, nil
 			}
 			logger.Errorf("[GoCache] Failed to get from peer: %v", err)
