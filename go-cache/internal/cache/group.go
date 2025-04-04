@@ -8,6 +8,7 @@ import (
 	"github.com/AdrianWangs/go-cache/internal/peers"
 	"github.com/AdrianWangs/go-cache/internal/singleflight"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
+	pb "github.com/AdrianWangs/go-cache/proto/cache_server"
 )
 
 // 一个Group可以认为是一个缓存的命名空间
@@ -105,7 +106,11 @@ func (g *Group) load(key string) (value ByteView, err error) {
 		if g.peers != nil {
 			// 选择一个节点，这个节点负责这个key的缓存
 			if peer, ok := g.peers.PickPeer(key); ok {
-				if value, err = g.getFromPeer(peer, key); err == nil {
+				// TODO 这里可以选择使用http协议或者protobuf协议
+				// if value, err = g.getFromPeer(peer, key); err == nil {
+				// 	return value, nil
+				// }
+				if value, err = g.getFromPeerByProto(peer, key); err == nil {
 					return value, nil
 				}
 				logger.Errorf("[GoCache] Failed to get from peer: %v", err)
@@ -148,6 +153,12 @@ func (g *Group) getLocally(key string) (ByteView, error) {
 // getFromPeer 调用对应的远端peer获取缓存
 //
 // 传入参数:
+//   - peer: 远端peer
+//   - key: 缓存的key
+//
+// 返回值:
+//   - ByteView: 缓存的value
+//   - error: 错误信息
 func (g *Group) getFromPeer(peer peers.PeerGetter, key string) (ByteView, error) {
 	logger.Debugf("[getFromPeer] Get %s/%s from peer", g.name, key)
 	bytes, err := peer.Get(g.name, key)
@@ -156,6 +167,33 @@ func (g *Group) getFromPeer(peer peers.PeerGetter, key string) (ByteView, error)
 	}
 	logger.Debugf("[getFromPeer] Successfully got data from peer for key: %s, size: %d bytes", key, len(bytes))
 	return ByteView{bytes: bytes}, nil
+}
+
+// getFromPeerByProto 调用对应的远端peer获取缓存,使用protobuf协议
+//
+// 传入参数:
+//   - peer: 远端peer
+//   - key: 缓存的key
+//
+// 返回值:
+//   - ByteView: 缓存的value
+//   - error: 错误信息
+func (g *Group) getFromPeerByProto(peer peers.PeerGetter, key string) (ByteView, error) {
+	logger.Debugf("[getFromPeerByProto] Get %s/%s from peer", g.name, key)
+
+	req := &pb.Request{
+		Group: g.name,
+		Key:   key,
+	}
+
+	resp := &pb.Response{}
+
+	if err := peer.GetByProto(req, resp); err != nil {
+		logger.Errorf("[getFromPeerByProto] Failed to get from peer: %v", err)
+		return ByteView{}, err
+	}
+
+	return ByteView{bytes: resp.Value}, nil
 }
 
 // populateCache 将源数据添加到缓存

@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package go_cache;
+
+option go_package = "./cache_server";
+
+message Request {
+  string group = 1; // 组名
+  string key = 2; // 键
+}
+
+message Response {
+  bytes value = 1; // 值
+}
+
+service GroupCache {
+  rpc Get(Request) returns (Response);
+}

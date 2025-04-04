@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -10,11 +11,20 @@ import (
 	"github.com/AdrianWangs/go-cache/internal/consistenthash"
 	"github.com/AdrianWangs/go-cache/internal/peers"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
+	pb "github.com/AdrianWangs/go-cache/proto/cache_server"
+	"google.golang.org/protobuf/proto"
 )
 
 // 默认的basePath
 const defaultBasePath = "/_gocache/"
 const defaultReplicas = 3
+
+type Protocol string
+
+const (
+	ProtocolHTTP     Protocol = "http"
+	ProtocolProtobuf Protocol = "protobuf"
+)
 
 // HTTPPool 实现了 PeerPicker 接口, 所以它是一个HTTP服务器
 type HTTPPool struct {
@@ -23,6 +33,7 @@ type HTTPPool struct {
 	mu          sync.RWMutex           // 互斥锁，确保节点选择器的安全
 	peers       *consistenthash.Map    // 节点选择器
 	httpGetters map[string]*httpGetter // 映射远程节点与对应的httpGetter, 键是远程节点的http地址,比如: "http://10.0.0.2:8000"
+	protocol    Protocol               // 协议
 }
 
 // 创建一个HTTPPool
@@ -36,6 +47,7 @@ func NewHTTPPool(self string) *HTTPPool {
 	return &HTTPPool{
 		self:     self,
 		basePath: defaultBasePath,
+		protocol: ProtocolProtobuf,
 	}
 }
 
@@ -55,6 +67,85 @@ func (p *HTTPPool) Log(format string, v ...interface{}) {
 func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logger.Debugf("[ServeHTTP] %s %s", r.Method, r.URL.Path)
 
+	switch p.protocol {
+	case ProtocolHTTP:
+		p.ProcessHTTPRequest(w, r)
+	case ProtocolProtobuf:
+		p.ProcessProtobufRequest(w, r)
+	}
+}
+
+// ProcessProtobufRequest 处理Protobuf请求
+//
+// 传入参数:
+//   - w: http.ResponseWriter
+//   - r: http.Request
+//
+// 返回值:
+//   - 无
+func (p *HTTPPool) ProcessProtobufRequest(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.URL.Path, p.basePath) {
+		// 如果请求路径不是以 basePath 开头, 返回错误
+		logger.Warnf("HTTPPool serving unexpected path: %s", r.URL.Path)
+		http.Error(w, "HTTPPool serving unexpected path: "+r.URL.Path, http.StatusBadRequest)
+		return
+	}
+
+	// 读取请求体
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		logger.Errorf("Failed to read request body: %v", err)
+		http.Error(w, "Failed to read request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// 使用protobuf协议处理请求
+	req := &pb.Request{}
+	if err := proto.Unmarshal(body, req); err != nil {
+		logger.Errorf("Failed to unmarshal request: %v", err)
+		http.Error(w, "Failed to unmarshal request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// 获取group
+	group := cache.GetGroup(req.Group)
+	if group == nil {
+		logger.Warnf("no such group: %s", req.Group)
+		http.Error(w, "no such group: "+req.Group, http.StatusNotFound)
+		return
+	}
+
+	// 获取缓存值
+	view, err := group.Get(req.Key)
+	if err != nil {
+		logger.Errorf("get cache error: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 将缓存值写入响应体
+	responseBytes, err := proto.Marshal(&pb.Response{Value: view.ByteSlice()})
+	if err != nil {
+		logger.Errorf("Failed to marshal response: %v", err)
+		http.Error(w, "Failed to marshal response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 写入响应体
+	w.Header().Set("Content-Type", "application/protobuf")
+	w.WriteHeader(http.StatusOK)
+	w.Write(responseBytes)
+}
+
+// ProcessHTTPRequest 处理HTTP请求
+//
+// 传入参数:
+//   - w: http.ResponseWriter
+//   - r: http.Request
+//
+// 返回值:
+//   - 无
+func (p *HTTPPool) ProcessHTTPRequest(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.URL.Path, p.basePath) {
 		// 如果请求路径不是以 basePath 开头, 返回错误
 		logger.Warnf("HTTPPool serving unexpected path: %s", r.URL.Path)
@@ -97,6 +188,14 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.WriteHeader(http.StatusOK)
 	w.Write(view.ByteSlice())
+}
+
+// SetProtocol 设置协议
+//
+// 传入参数:
+//   - protocol: 协议
+func (p *HTTPPool) SetProtocol(protocol Protocol) {
+	p.protocol = protocol
 }
 
 // Set 设置节点
