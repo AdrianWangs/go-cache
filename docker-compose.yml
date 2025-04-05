@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  etcd:
+    image: bitnami/etcd:3.5 # 使用与客户端兼容的版本或更新版本
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes # 允许无密码访问，仅限开发环境
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379 # 客户端访问地址
+    ports:
+      - "2379:2379" # 客户端端口映射
+      # - "2380:2380" # Peer端口映射（单节点时非必需，集群时需要）
+    volumes:
+      - etcd_data:/bitnami/etcd # 持久化数据
+    networks:
+      - go_cache_net
+
+volumes:
+  etcd_data:
+    driver: local
+
+networks:
+  go_cache_net:
+    driver: bridge 
