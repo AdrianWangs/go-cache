@@ -33,7 +33,10 @@ func New(replicas int, fn Hash) *Map {
 	return m
 }
 
-// Add adds some keys to the hash
+// Add 用于往一致性哈希环中添加节点
+//
+// 传入参数:
+//   - keys: 节点名称的列表
 func (m *Map) Add(keys ...string) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
