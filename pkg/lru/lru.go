@@ -3,7 +3,9 @@ package lru
 
 import (
 	"container/list"
+	"math"
 	"sync"
+	"time"
 )
 
 // Value is the interface that all values stored in the cache must implement
@@ -26,6 +28,7 @@ type Cache struct {
 type entry struct {
 	key   string
 	value Value
+	exp   time.Time
 }
 
 // New creates a new LRU cache with the specified memory limit and eviction callback
@@ -46,6 +49,15 @@ func (c *Cache) Get(key string) (value Value, ok bool) {
 		// Lock for write to modify the list
 		c.mutex.Lock()
 		defer c.mutex.Unlock()
+
+		// 过期就删除
+		if ele.Value.(*entry).exp.Before(time.Now()) {
+			c.ll.Remove(ele)
+			delete(c.cache, key)
+			c.nbytes -= int64(len(key)) + int64(ele.Value.(*entry).value.Len())
+			return nil, false
+		}
+
 		c.ll.MoveToBack(ele)
 		kv := ele.Value.(*entry)
 		return kv.value, true
@@ -55,7 +67,7 @@ func (c *Cache) Get(key string) (value Value, ok bool) {
 }
 
 // Add adds a value to the cache, replacing an existing value if the key exists
-func (c *Cache) Add(key string, value Value) {
+func (c *Cache) Add(key string, value Value, ttl time.Duration) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -67,7 +79,14 @@ func (c *Cache) Add(key string, value Value) {
 		kv.value = value
 	} else {
 		// Add new entry
-		ele := c.ll.PushBack(&entry{key, value})
+		var exp time.Time
+		if ttl > 0 {
+			exp = time.Now().Add(ttl)
+		} else {
+			// 如果ttl为0，则设置为time的max
+			exp = time.Unix(math.MaxInt64, 0)
+		}
+		ele := c.ll.PushBack(&entry{key, value, exp})
 		c.cache[key] = ele
 		c.nbytes += int64(len(key)) + int64(value.Len())
 	}

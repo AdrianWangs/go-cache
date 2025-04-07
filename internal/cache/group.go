@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/AdrianWangs/go-cache/internal/peers"
 	"github.com/AdrianWangs/go-cache/internal/singleflight"
@@ -17,6 +18,7 @@ type Group struct {
 	mainCache *Cache              // main cache
 	peers     peers.PeerPicker    // peer picker interface
 	loader    *singleflight.Group // singleflight prevents redundant loads
+	ttl       time.Duration       // ttl of the cache
 }
 
 var (
@@ -25,7 +27,7 @@ var (
 )
 
 // NewGroup creates a new Group
-func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
+func NewGroup(name string, cacheBytes int64, getter Getter, ttl time.Duration) *Group {
 	if getter == nil {
 		logger.Fatal("nil Getter provided to NewGroup")
 	}
@@ -38,6 +40,7 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 		getter:    getter,
 		mainCache: newCache(cacheBytes),
 		loader:    &singleflight.Group{},
+		ttl:       ttl,
 	}
 
 	groups[name] = g
@@ -133,13 +136,13 @@ func (g *Group) getLocally(key string) (value ByteView, err error) {
 	}
 
 	value = ByteView{bytes: cloneBytes(bytes)}
-	g.populateCache(key, value)
+	g.populateCache(key, value, g.ttl)
 	return value, nil
 }
 
 // populateCache adds a value to the cache
-func (g *Group) populateCache(key string, value ByteView) {
-	g.mainCache.add(key, value)
+func (g *Group) populateCache(key string, value ByteView, ttl time.Duration) {
+	g.mainCache.add(key, value, ttl)
 	logger.Debugf("[Cache] cached key:%s in group:%s", key, g.name)
 }
 

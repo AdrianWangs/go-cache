@@ -3,6 +3,7 @@ package cache
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/AdrianWangs/go-cache/pkg/lru"
 )
@@ -29,7 +30,7 @@ func newCache(cacheBytes int64) *Cache {
 }
 
 // add adds a value to the cache
-func (c *Cache) add(key string, value ByteView) {
+func (c *Cache) add(key string, value ByteView, ttl time.Duration) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -37,7 +38,7 @@ func (c *Cache) add(key string, value ByteView) {
 	if c.lru == nil {
 		c.lru = lru.New(c.cacheBytes, nil)
 	}
-	c.lru.Add(key, value)
+	c.lru.Add(key, value, ttl)
 }
 
 // get looks up a key's value from the cache

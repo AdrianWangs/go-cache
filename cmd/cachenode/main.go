@@ -32,6 +32,7 @@ var (
 	cacheSize     = flag.Int64("cache-size", 1024*1024*64, "缓存大小 (bytes)")
 	groupName     = flag.String("group-name", "scores", "缓存组名称")
 	leaseTTL      = flag.Int64("lease-ttl", 10, "etcd租约TTL（秒）")
+	ttl           = flag.Int64("ttl", 0, "缓存过期时间（秒）")
 )
 
 // 模拟数据源
@@ -126,7 +127,7 @@ func main() {
 		logger.Debugf("[本地数据源] 未找到 key: %s", key)
 		return nil, fmt.Errorf("本地未找到 key: %s", key)
 	})
-	group := cache.NewGroup(*groupName, *cacheSize, getter)
+	group := cache.NewGroup(*groupName, *cacheSize, getter, time.Duration(*ttl))
 
 	// 2. 创建 HTTP Pool，显式设置 Protobuf 协议
 	pool := server.NewHTTPPool(httpAddr,
