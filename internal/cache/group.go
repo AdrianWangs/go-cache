@@ -64,11 +64,12 @@ func (g *Group) Get(key string) (ByteView, error) {
 
 	// Try local cache first
 	if v, ok := g.mainCache.get(key); ok {
-		logger.Debugf("[Cache] hit for group:%s key:%s", g.name, key)
+		logger.Infof("[Cache] HIT - 从本地缓存命中: group:%s key:%s", g.name, key)
 		return v, nil
 	}
 
 	// Cache miss, load from remote or locally
+	logger.Infof("[Cache] MISS - 本地缓存未命中: group:%s key:%s，将从远程或数据源加载", g.name, key)
 	return g.load(key)
 }
 
@@ -99,18 +100,24 @@ func (g *Group) load(key string) (value ByteView, err error) {
 	viewi, err := g.loader.Do(key, func() (interface{}, error) {
 		// Try to get from peer first
 		if g.peers != nil {
+			logger.Debugf("[Cache] 尝试从对等节点获取数据: group=%s, key=%s", g.name, key)
 			if peer, ok := g.peers.PickPeer(key); ok {
 				// Use protobuf for communication
 				value, err := g.getFromPeerWithProto(peer, key)
 				if err == nil {
-					logger.Debugf("[Cache] got value from peer for group:%s key:%s", g.name, key)
+					logger.Infof("[Cache] 成功从对等节点获取数据: group=%s, key=%s", g.name, key)
 					return value, nil
 				}
-				logger.Errorf("[Cache] failed to get from peer: %v", err)
+				logger.Warnf("[Cache] 从对等节点获取失败，将回退到本地数据源: %v", err)
+			} else {
+				logger.Debugf("[Cache] 没有找到合适的对等节点，将使用本地数据源: group=%s, key=%s", g.name, key)
 			}
+		} else {
+			logger.Debugf("[Cache] 未配置对等节点，直接使用本地数据源: group=%s, key=%s", g.name, key)
 		}
 
 		// Fall back to local data source
+		logger.Infof("[Cache] 从本地数据源加载数据: group=%s, key=%s", g.name, key)
 		return g.getLocally(key)
 	})
 
@@ -123,6 +130,7 @@ func (g *Group) load(key string) (value ByteView, err error) {
 
 // getLocally loads key by calling the getter and stores it in the cache
 func (g *Group) getLocally(key string) (value ByteView, err error) {
+	logger.Debugf("从本地获取key: %s", key)
 	bytes, err := g.getter.Get(key)
 	if err != nil {
 		logger.Errorf("[Cache] failed to get locally: %v", err)
@@ -143,7 +151,8 @@ func (g *Group) getLocally(key string) (value ByteView, err error) {
 // populateCache adds a value to the cache
 func (g *Group) populateCache(key string, value ByteView, ttl time.Duration) {
 	g.mainCache.add(key, value, ttl)
-	logger.Debugf("[Cache] cached key:%s in group:%s", key, g.name)
+	logger.Infof("[Cache] 已缓存数据: group=%s, key=%s, 大小=%d字节, TTL=%v",
+		g.name, key, value.Len(), ttl)
 }
 
 // getFromPeerWithProto gets a value from a peer using protobuf
@@ -180,4 +189,15 @@ func GetGroups() map[string]*Group {
 // Stats returns statistics for this cache group
 func (g *Group) Stats() CacheStats {
 	return g.mainCache.stats
+}
+
+// Delete removes a key from the cache
+func (g *Group) Delete(key string) error {
+	if key == "" {
+		return ErrEmptyKey
+	}
+
+	g.mainCache.delete(key)
+	logger.Debugf("[Cache] deleted key:%s from group:%s", key, g.name)
+	return nil
 }

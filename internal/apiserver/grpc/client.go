@@ -62,30 +62,34 @@ func (c *CacheClient) Close() error {
 }
 
 // Get 通过gRPC获取缓存值
-func (c *CacheClient) Get(group, key string) ([]byte, error) {
+func (c *CacheClient) Get(group string, key string) ([]byte, error) {
+	// 确保已连接
 	if c.client == nil {
 		if err := c.Connect(); err != nil {
 			return nil, err
 		}
 	}
 
-	// 创建带超时的上下文
+	// 创建上下文
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 
-	// 发送gRPC请求
+	// 发送请求
 	req := &pb.Request{
 		Group: group,
 		Key:   key,
 	}
 
+	// 尝试请求
 	resp, err := c.client.Get(ctx, req)
 	if err != nil {
-		// 如果是连接问题，可以尝试重连
-		logger.Warnf("gRPC调用失败: %v，将尝试重连", err)
-		if reconnErr := c.Connect(); reconnErr != nil {
-			logger.Errorf("重连失败: %v", reconnErr)
-			return nil, err // 返回原始错误
+		// 连接错误时尝试重连
+		c.conn.Close()
+		c.conn = nil
+		c.client = nil
+
+		if err := c.Connect(); err != nil {
+			return nil, fmt.Errorf("重连失败: %v", err)
 		}
 
 		// 重试一次
@@ -96,6 +100,47 @@ func (c *CacheClient) Get(group, key string) ([]byte, error) {
 	}
 
 	return resp.Value, nil
+}
+
+// Delete 通过gRPC删除缓存值
+func (c *CacheClient) Delete(group string, key string) error {
+	// 确保已连接
+	if c.client == nil {
+		if err := c.Connect(); err != nil {
+			return err
+		}
+	}
+
+	// 创建上下文
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
+
+	// 发送请求
+	req := &pb.DeleteRequest{
+		Group: group,
+		Key:   key,
+	}
+
+	// 尝试请求
+	_, err := c.client.Delete(ctx, req)
+	if err != nil {
+		// 连接错误时尝试重连
+		c.conn.Close()
+		c.conn = nil
+		c.client = nil
+
+		if err := c.Connect(); err != nil {
+			return fmt.Errorf("重连失败: %v", err)
+		}
+
+		// 重试一次
+		_, err = c.client.Delete(ctx, req)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // SetTimeout 设置客户端请求超时

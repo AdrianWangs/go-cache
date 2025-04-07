@@ -6,6 +6,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/AdrianWangs/go-cache/pkg/logger"
 )
 
 // Value is the interface that all values stored in the cache must implement
@@ -50,16 +52,25 @@ func (c *Cache) Get(key string) (value Value, ok bool) {
 		c.mutex.Lock()
 		defer c.mutex.Unlock()
 
+		// 获取条目并检查过期时间
+		kv := ele.Value.(*entry)
+		now := time.Now()
+
 		// 过期就删除
-		if ele.Value.(*entry).exp.Before(time.Now()) {
+		if kv.exp.Before(now) {
+			logger.Infof("缓存项已过期: key=%s, 过期时间=%v, 当前时间=%v, 过期差=%v",
+				key, kv.exp.Format(time.RFC3339), now.Format(time.RFC3339), now.Sub(kv.exp))
 			c.ll.Remove(ele)
 			delete(c.cache, key)
-			c.nbytes -= int64(len(key)) + int64(ele.Value.(*entry).value.Len())
+			c.nbytes -= int64(len(key)) + int64(kv.value.Len())
 			return nil, false
 		}
 
+		// 输出剩余过期时间
+		remaining := kv.exp.Sub(now)
+		logger.Debugf("缓存命中: key=%s, 剩余有效时间=%v", key, remaining)
+
 		c.ll.MoveToBack(ele)
-		kv := ele.Value.(*entry)
 		return kv.value, true
 	}
 	c.mutex.RUnlock()
@@ -77,14 +88,30 @@ func (c *Cache) Add(key string, value Value, ttl time.Duration) {
 		kv := ele.Value.(*entry)
 		c.nbytes += int64(value.Len()) - int64(kv.value.Len())
 		kv.value = value
+
+		// 更新过期时间
+		var exp time.Time
+		if ttl > 0 {
+			exp = time.Now().Add(ttl)
+			logger.Debugf("更新缓存项过期时间: key=%s, TTL=%v, 过期时间=%v",
+				key, ttl, exp.Format(time.RFC3339))
+		} else {
+			// 如果ttl为0，则设置为time的max
+			exp = time.Unix(math.MaxInt64, 0)
+			logger.Debugf("更新缓存项永不过期: key=%s", key)
+		}
+		kv.exp = exp
 	} else {
 		// Add new entry
 		var exp time.Time
 		if ttl > 0 {
 			exp = time.Now().Add(ttl)
+			logger.Debugf("添加新缓存项: key=%s, TTL=%v, 过期时间=%v",
+				key, ttl, exp.Format(time.RFC3339))
 		} else {
 			// 如果ttl为0，则设置为time的max
 			exp = time.Unix(math.MaxInt64, 0)
+			logger.Debugf("添加永不过期的缓存项: key=%s", key)
 		}
 		ele := c.ll.PushBack(&entry{key, value, exp})
 		c.cache[key] = ele
@@ -127,4 +154,23 @@ func (c *Cache) Clear() {
 	c.ll = list.New()
 	c.cache = make(map[string]*list.Element)
 	c.nbytes = 0
+}
+
+// Delete removes a key from the cache
+func (c *Cache) Delete(key string) bool {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if ele, ok := c.cache[key]; ok {
+		c.ll.Remove(ele)
+		kv := ele.Value.(*entry)
+		delete(c.cache, key)
+		c.nbytes -= int64(len(key)) + int64(kv.value.Len())
+
+		if c.OnEvicted != nil {
+			c.OnEvicted(key, kv.value)
+		}
+		return true
+	}
+	return false
 }

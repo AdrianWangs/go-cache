@@ -2,6 +2,8 @@
 package routes
 
 import (
+	"net/http"
+
 	"github.com/AdrianWangs/go-cache/api/handlers"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
 	"github.com/AdrianWangs/go-cache/pkg/router"
@@ -24,7 +26,16 @@ func RegisterRoutes(r *router.Router, cacheHandler *handlers.CacheHandler,
 
 	// 缓存路由组
 	cacheRoutes := apiGroup.Group("/cache")
-	cacheRoutes.RegisterFunc("/", cacheHandler.GetCacheHandler)
+	// 同时支持GET和DELETE方法
+	cacheRoutes.RegisterFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == "" {
+			cacheHandler.GetCacheHandler(w, r)
+		} else if r.Method == http.MethodDelete {
+			cacheHandler.DeleteCacheHandler(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 
 	// 节点路由组
 	nodeRoutes := apiGroup.Group("/nodes")

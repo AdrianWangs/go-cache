@@ -127,7 +127,18 @@ func main() {
 		logger.Debugf("[本地数据源] 未找到 key: %s", key)
 		return nil, fmt.Errorf("本地未找到 key: %s", key)
 	})
-	group := cache.NewGroup(*groupName, *cacheSize, getter, time.Duration(*ttl))
+
+	var cacheTTL time.Duration
+	if *ttl > 0 {
+		cacheTTL = time.Duration(*ttl) * time.Second
+	} else {
+		// 如果未设置TTL或为0，则默认使用1小时
+		cacheTTL = time.Hour
+		logger.Infof("未设置缓存TTL，将使用默认值: %v", cacheTTL)
+	}
+
+	group := cache.NewGroup(*groupName, *cacheSize, getter, cacheTTL)
+	logger.Infof("已创建缓存组: %s, 大小: %d字节, TTL: %v", *groupName, *cacheSize, cacheTTL)
 
 	// 2. 创建 HTTP Pool，显式设置 Protobuf 协议
 	pool := server.NewHTTPPool(httpAddr,

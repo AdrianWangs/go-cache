@@ -35,6 +35,12 @@ func (p *PeerGetter) GetByProto(req *pb.Request, resp *pb.Response) error {
 	return nil
 }
 
+// Delete 删除指定组和键的缓存
+func (p *PeerGetter) Delete(group string, key string) error {
+	// 使用gRPC客户端删除数据
+	return p.client.Delete(group, key)
+}
+
 // Close 关闭gRPC连接
 func (p *PeerGetter) Close() error {
 	return p.client.Close()

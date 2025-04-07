@@ -137,3 +137,42 @@ func (g *GRPCGetter) GetByProto(req *pb.Request, resp *pb.Response) error {
 func (g *GRPCGetter) SetTimeout(timeout time.Duration) {
 	g.timeout = timeout
 }
+
+// Delete 从gRPC缓存节点删除指定的缓存项
+func (g *GRPCGetter) Delete(group string, key string) error {
+	// 确保连接已建立
+	if err := g.ensureConnection(); err != nil {
+		return err
+	}
+
+	// 创建带超时的上下文
+	ctx, cancel := context.WithTimeout(context.Background(), g.timeout)
+	defer cancel()
+
+	// 创建请求
+	req := &pb.DeleteRequest{
+		Group: group,
+		Key:   key,
+	}
+
+	// 发送gRPC请求
+	_, err := g.client.Delete(ctx, req)
+	if err != nil {
+		// 如果是连接问题，尝试重连
+		logger.Warnf("gRPC Delete调用失败: %v，将尝试重连", err)
+		g.Close() // 关闭旧连接
+
+		if reconnErr := g.ensureConnection(); reconnErr != nil {
+			logger.Errorf("重连失败: %v", reconnErr)
+			return err // 返回原始错误
+		}
+
+		// 重试一次
+		_, err = g.client.Delete(ctx, req)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

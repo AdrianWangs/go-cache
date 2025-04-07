@@ -82,20 +82,43 @@ func (s *Server) cacheHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 从缓存获取值
-	view, err := group.Get(key)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if err == cache.ErrNotFound {
-			status = http.StatusNotFound
+	// 根据HTTP方法处理不同的请求
+	switch r.Method {
+	case http.MethodGet, "": // 默认为GET
+		// 从缓存获取值
+		view, err := group.Get(key)
+		if err != nil {
+			status := http.StatusInternalServerError
+			if err == cache.ErrNotFound {
+				status = http.StatusNotFound
+			}
+			http.Error(w, err.Error(), status)
+			return
 		}
-		http.Error(w, err.Error(), status)
-		return
-	}
 
-	// 设置响应头
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Write(view.ByteSlice())
+		// 设置响应头
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write(view.ByteSlice())
+
+	case http.MethodDelete:
+		// 从缓存删除值
+		err := group.Delete(key)
+		if err != nil {
+			status := http.StatusInternalServerError
+			if err == cache.ErrEmptyKey {
+				status = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+
+		// 返回成功响应
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Deleted successfully"))
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // statusHandler 处理状态请求

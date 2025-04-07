@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+
+	"github.com/AdrianWangs/go-cache/pkg/logger"
 )
 
 // Hash maps bytes to uint32
@@ -75,7 +77,9 @@ func (m *Map) Get(key string) string {
 		idx = 0
 	}
 
-	return m.hashMap[m.keys[idx]]
+	node := m.hashMap[m.keys[idx]]
+	logger.Debugf("一致性哈希: key=%s, hash=%d, 选中节点=%s", key, hash, node)
+	return node
 }
 
 // Remove removes a node from the hash

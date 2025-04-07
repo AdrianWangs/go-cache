@@ -139,6 +139,40 @@ func (h *HTTPGetter) GetByProto(req *pb.Request, resp *pb.Response) error {
 	return nil
 }
 
+// Delete 删除指定组和键的缓存
+func (h *HTTPGetter) Delete(group string, key string) error {
+	// 构建请求URL
+	u := fmt.Sprintf("%v/%v/%v", h.baseURL, url.QueryEscape(group), url.QueryEscape(key))
+
+	logger.Debugf("发送HTTP DELETE请求: %s", u)
+
+	// 创建DELETE请求
+	req, err := http.NewRequest(http.MethodDelete, u, nil)
+	if err != nil {
+		return fmt.Errorf("创建DELETE请求失败: %v", err)
+	}
+
+	// 发送HTTP请求
+	res, err := h.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("发送DELETE请求失败: %v", err)
+	}
+	defer res.Body.Close()
+
+	// 检查响应状态
+	if res.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("key not found: %s", key)
+	} else if res.StatusCode != http.StatusOK {
+		// 读取错误响应内容
+		errBody, _ := io.ReadAll(res.Body)
+		errMsg := string(errBody)
+
+		return fmt.Errorf("服务器返回错误: %v, 详情: %s", res.Status, errMsg)
+	}
+
+	return nil
+}
+
 // ProtoGetter 专用于Protobuf通信的客户端
 type ProtoGetter struct {
 	baseURL    string     // 基础URL
@@ -235,6 +269,51 @@ func (p *ProtoGetter) GetByProto(req *pb.Request, resp *pb.Response) error {
 	// 反序列化响应
 	if err = proto.Unmarshal(respBody, resp); err != nil {
 		return fmt.Errorf("反序列化响应失败: %v", err)
+	}
+
+	return nil
+}
+
+// Delete 删除指定组和键的缓存
+func (p *ProtoGetter) Delete(group string, key string) error {
+	// 构建删除URL
+	u := fmt.Sprintf("%v/%v/%v", p.baseURL, url.QueryEscape(group), url.QueryEscape(key))
+
+	logger.Debugf("发送Protobuf DELETE请求: %s", u)
+
+	// 创建DELETE请求
+	req, err := http.NewRequest(http.MethodDelete, u, nil)
+	if err != nil {
+		return fmt.Errorf("创建DELETE请求失败: %v", err)
+	}
+
+	// 发送HTTP请求
+	res, err := p.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("发送DELETE请求失败: %v", err)
+	}
+	defer res.Body.Close()
+
+	// 检查响应状态
+	if res.StatusCode == http.StatusNotFound {
+		return cache.ErrNotFound
+	} else if res.StatusCode != http.StatusOK {
+		// 读取错误响应内容
+		errBody, _ := io.ReadAll(res.Body)
+		errMsg := string(errBody)
+
+		// 根据错误消息判断错误类型
+		if strings.Contains(errMsg, "key not found") ||
+			strings.Contains(errMsg, "not found") {
+			return cache.ErrNotFound
+		} else if strings.Contains(errMsg, "key is empty") {
+			return cache.ErrEmptyKey
+		} else if strings.Contains(errMsg, "no such group") ||
+			strings.Contains(errMsg, "group not found") {
+			return cache.ErrNoSuchGroup
+		}
+
+		return fmt.Errorf("服务器返回错误: %v, 详情: %s", res.Status, errMsg)
 	}
 
 	return nil

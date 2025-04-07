@@ -18,6 +18,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type GroupCacheClient interface {
 	Get(ctx context.Context, in *Request, opts ...grpc.CallOption) (*Response, error)
+	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
 }
 
 type groupCacheClient struct {
@@ -37,11 +38,21 @@ func (c *groupCacheClient) Get(ctx context.Context, in *Request, opts ...grpc.Ca
 	return out, nil
 }
 
+func (c *groupCacheClient) Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error) {
+	out := new(DeleteResponse)
+	err := c.cc.Invoke(ctx, "/go_cache.GroupCache/Delete", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GroupCacheServer is the server API for GroupCache service.
 // All implementations must embed UnimplementedGroupCacheServer
 // for forward compatibility
 type GroupCacheServer interface {
 	Get(context.Context, *Request) (*Response, error)
+	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
 	mustEmbedUnimplementedGroupCacheServer()
 }
 
@@ -51,6 +62,9 @@ type UnimplementedGroupCacheServer struct {
 
 func (UnimplementedGroupCacheServer) Get(context.Context, *Request) (*Response, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Get not implemented")
+}
+func (UnimplementedGroupCacheServer) Delete(context.Context, *DeleteRequest) (*DeleteResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Delete not implemented")
 }
 func (UnimplementedGroupCacheServer) mustEmbedUnimplementedGroupCacheServer() {}
 
@@ -83,6 +97,24 @@ func _GroupCache_Get_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GroupCache_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GroupCacheServer).Delete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/go_cache.GroupCache/Delete",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GroupCacheServer).Delete(ctx, req.(*DeleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var _GroupCache_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "go_cache.GroupCache",
 	HandlerType: (*GroupCacheServer)(nil),
@@ -90,6 +122,10 @@ var _GroupCache_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Get",
 			Handler:    _GroupCache_Get_Handler,
+		},
+		{
+			MethodName: "Delete",
+			Handler:    _GroupCache_Delete_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -20,7 +20,7 @@ type Fields map[string]interface{}
 func init() {
 	// Set default configuration
 	defaultLogger.SetOutput(os.Stdout)
-	defaultLogger.SetLevel(logrus.InfoLevel)
+	defaultLogger.SetLevel(logrus.DebugLevel)
 	defaultLogger.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp:   true,
 		TimestampFormat: "2006-01-02 15:04:05",

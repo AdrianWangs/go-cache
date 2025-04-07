@@ -40,6 +40,8 @@ type NodeGetter interface {
 	Get(group string, key string) ([]byte, error)
 	// GetByProto 使用 protobuf 获取指定请求的值
 	GetByProto(req *pb.Request, resp *pb.Response) error
+	// Delete 删除指定组和键的缓存
+	Delete(group string, key string) error
 }
 
 // CacheHandlerOptions 缓存处理器选项
@@ -215,6 +217,71 @@ func (h *CacheHandler) GetCacheHandler(w http.ResponseWriter, r *http.Request) {
 	logger.Debugf("成功从节点 %s 获取数据, 长度: %d bytes", nodeAddr, len(res.Value))
 }
 
+// DeleteCacheHandler 处理 /cache/{group}/{key} 或 /api/cache/{group}/{key} 的DELETE请求
+func (h *CacheHandler) DeleteCacheHandler(w http.ResponseWriter, r *http.Request) {
+	// 只处理DELETE请求
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed, only DELETE is supported", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 解析 URL 路径
+	parts := h.parseCachePath(r.URL.Path)
+	if parts == nil {
+		http.Error(w, "Bad Request: expected /cache/{group}/{key} or /api/cache/{group}/{key}", http.StatusBadRequest)
+		return
+	}
+
+	groupName, key := parts[0], parts[1]
+	logger.Debugf("收到删除缓存请求: group=%s, key=%s", groupName, key)
+
+	// 根据 key 选择节点
+	nodeAddr, getter := h.pickNode(key)
+	if getter == nil {
+		http.Error(w, "No suitable cache node available", http.StatusServiceUnavailable)
+		logger.Warnf("无法为 key '%s' 找到合适的缓存节点", key)
+		return
+	}
+
+	logger.Debugf("选择节点 %s 删除 key=%s (group=%s)", nodeAddr, key, groupName)
+
+	// 发送删除请求到选中的节点
+	err := getter.Delete(groupName, key)
+	if err != nil {
+		// 错误处理逻辑与Get类似
+		errMsg := err.Error()
+
+		if errors.Is(err, cache.ErrNotFound) || cache.IsKeyNotFoundError(err) {
+			// 键不存在错误
+			http.Error(w, fmt.Sprintf("Key not found: %s", key), http.StatusNotFound)
+			logger.Warnf("键不存在无法删除: %s (group=%s)", key, groupName)
+		} else if errors.Is(err, cache.ErrEmptyKey) || cache.IsKeyEmptyError(err) {
+			// 键为空错误
+			http.Error(w, "Key is empty", http.StatusBadRequest)
+			logger.Warnf("键为空错误: %s", errMsg)
+		} else if errors.Is(err, cache.ErrNoSuchGroup) || cache.IsGroupNotFoundError(err) {
+			// 组不存在错误
+			http.Error(w, fmt.Sprintf("Group not found: %s", groupName), http.StatusNotFound)
+			logger.Warnf("组不存在: %s", groupName)
+		} else if strings.Contains(errMsg, "key not found") ||
+			strings.Contains(errMsg, "not found") {
+			// 通过错误消息判断是键不存在
+			http.Error(w, fmt.Sprintf("Key not found: %s", key), http.StatusNotFound)
+			logger.Warnf("键不存在无法删除: %s (group=%s)", key, groupName)
+		} else {
+			// 其他类型的错误返回500
+			http.Error(w, fmt.Sprintf("Failed to delete data: %v", err), http.StatusInternalServerError)
+			logger.Errorf("从节点 %s 删除数据失败: %v", nodeAddr, err)
+		}
+		return
+	}
+
+	// 删除成功，返回200 OK
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Deleted successfully"))
+	logger.Debugf("成功从节点 %s 删除数据: %s (group=%s)", nodeAddr, key, groupName)
+}
+
 // 解析缓存路径 /cache/{group}/{key} 或 /api/cache/{group}/{key}
 func (h *CacheHandler) parseCachePath(path string) []string {
 	parts := strings.Split(path, "/")
@@ -251,17 +318,22 @@ func (h *CacheHandler) pickNode(key string) (string, NodeGetter) {
 	defer h.mu.RUnlock()
 
 	if len(h.nodeGetters) == 0 {
+		logger.Warnf("无可用节点处理请求: key=%s", key)
 		return "", nil
 	}
 
 	node := h.ring.Get(key)
 	if node == "" {
+		logger.Warnf("一致性哈希环无法为key=%s分配节点", key)
 		return "", nil
 	}
+
+	logger.Debugf("一致性哈希选择节点 %s 处理 key=%s", node, key)
 
 	if getter, ok := h.nodeGetters[node]; ok {
 		return node, getter
 	}
 
+	logger.Warnf("找不到节点 %s 的getter，可能节点列表与getter不同步", node)
 	return "", nil
 }

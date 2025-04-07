@@ -70,3 +70,21 @@ func (s *CacheServer) Get(ctx context.Context, req *pb.Request) (*pb.Response, e
 		Value: val.ByteSlice(),
 	}, nil
 }
+
+// Delete 实现gRPC的Delete方法，从缓存中删除值
+func (s *CacheServer) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteResponse, error) {
+	group := cache.GetGroup(req.Group)
+	if group == nil {
+		return nil, fmt.Errorf("未找到组: %s", req.Group)
+	}
+
+	// 从缓存删除值
+	err := group.Delete(req.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.DeleteResponse{
+		Success: true,
+	}, nil
+}

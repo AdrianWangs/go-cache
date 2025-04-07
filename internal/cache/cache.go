@@ -70,3 +70,15 @@ func (c *Cache) clear() {
 		c.lru.Clear()
 	}
 }
+
+// delete removes a key from the cache
+func (c *Cache) delete(key string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if c.lru == nil {
+		return
+	}
+
+	c.lru.Delete(key)
+}

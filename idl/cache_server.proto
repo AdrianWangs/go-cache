@@ -13,6 +13,16 @@ message Response {
   bytes value = 1; // 值
 }
 
+message DeleteRequest {
+  string group = 1; // 组名
+  string key = 2; // 键
+}
+
+message DeleteResponse {
+  bool success = 1; // 是否成功
+}
+
 service GroupCache {
   rpc Get(Request) returns (Response);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
 }
