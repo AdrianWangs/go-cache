@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/AdrianWangs/go-cache/api"
+	"github.com/AdrianWangs/go-cache/api/handlers"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
 )
 
@@ -17,6 +18,7 @@ var (
 	apiPort       = flag.Int("api-port", 8080, "API服务监听端口")
 	replicas      = flag.Int("replicas", 3, "一致性哈希虚拟节点倍数")
 	basePath      = flag.String("base-path", "/_gocache/", "缓存节点内部通信路径")
+	protocol      = flag.String("protocol", "grpc", "通信协议 (http 或 grpc)")
 )
 
 func main() {
@@ -27,12 +29,24 @@ func main() {
 		logger.Fatal("etcd-endpoints 不能为空")
 	}
 
+	// 检查协议类型
+	var protocolType handlers.ProtocolType
+	switch strings.ToLower(*protocol) {
+	case "http":
+		protocolType = handlers.ProtocolHTTP
+	case "grpc":
+		protocolType = handlers.ProtocolGRPC
+	default:
+		logger.Fatalf("不支持的协议类型: %s，只能是 http 或 grpc", *protocol)
+	}
+
 	logger.Info("API服务节点启动中...")
 	logger.Infof("Etcd Endpoints: %v", endpoints)
 	logger.Infof("监视的服务名称: %s", *serviceName)
 	logger.Infof("API监听端口: %d", *apiPort)
 	logger.Infof("一致性哈希虚拟节点倍数: %d", *replicas)
 	logger.Infof("缓存节点内部通信路径: %s", *basePath)
+	logger.Infof("使用通信协议: %s", protocolType)
 
 	// 创建 ApiServer 配置
 	cfg := &api.ApiServerConfig{
@@ -41,6 +55,7 @@ func main() {
 		ApiPort:       *apiPort,
 		Replicas:      *replicas,
 		BasePath:      *basePath,
+		Protocol:      protocolType,
 	}
 
 	// 创建并启动 ApiServer

@@ -14,6 +14,16 @@ import (
 	pb "github.com/AdrianWangs/go-cache/proto/cache_server"
 )
 
+// ProtocolType 定义通信协议类型
+type ProtocolType string
+
+const (
+	// ProtocolHTTP 使用HTTP通信
+	ProtocolHTTP ProtocolType = "http"
+	// ProtocolGRPC 使用gRPC通信
+	ProtocolGRPC ProtocolType = "grpc"
+)
+
 // CacheHandler 缓存处理器，处理缓存相关的请求
 type CacheHandler struct {
 	mu          sync.RWMutex
@@ -21,6 +31,7 @@ type CacheHandler struct {
 	ring        *consistenthash.Map   // 一致性哈希环
 	replicas    int                   // 虚拟节点倍数
 	nodeGetters map[string]NodeGetter // 节点地址到 NodeGetter 的映射
+	protocol    ProtocolType          // 通信协议类型
 }
 
 // NodeGetter 统一了获取缓存节点数据的接口
@@ -31,13 +42,31 @@ type NodeGetter interface {
 	GetByProto(req *pb.Request, resp *pb.Response) error
 }
 
+// CacheHandlerOptions 缓存处理器选项
+type CacheHandlerOptions struct {
+	Protocol ProtocolType // 通信协议类型，默认HTTP
+}
+
 // NewCacheHandler 创建新的缓存处理器
-func NewCacheHandler(basePath string, replicas int) *CacheHandler {
+func NewCacheHandler(basePath string, replicas int, options ...CacheHandlerOptions) *CacheHandler {
+	// 默认选项
+	opts := CacheHandlerOptions{
+		Protocol: ProtocolHTTP, // 默认使用HTTP
+	}
+
+	// 应用提供的选项
+	if len(options) > 0 {
+		opts = options[0]
+	}
+
+	logger.Infof("缓存处理器使用 %s 协议", opts.Protocol)
+
 	return &CacheHandler{
 		basePath:    basePath,
 		replicas:    replicas,
 		ring:        consistenthash.New(replicas, nil),
 		nodeGetters: make(map[string]NodeGetter),
+		protocol:    opts.Protocol,
 	}
 }
 
@@ -58,11 +87,33 @@ func (h *CacheHandler) UpdatePeers(peers []string, getterFactory func(baseURL st
 			newGetters[peer] = getter
 		} else {
 			// 为新节点创建 getter
-			baseURL := fmt.Sprintf("http://%s%s", peer, h.basePath)
-			newGetters[peer] = getterFactory(baseURL)
-			logger.Infof("为节点 %s 创建新的 getter (URL: %s)", peer, baseURL)
+			var baseURL string
+			if h.protocol == ProtocolGRPC {
+				// 对于gRPC，直接使用地址
+				baseURL = peer
+				newGetters[peer] = NewGRPCGetter(baseURL)
+				logger.Infof("为节点 %s 创建新的 gRPC getter", peer)
+			} else {
+				// 对于HTTP，构建基础URL
+				baseURL = fmt.Sprintf("http://%s%s", peer, h.basePath)
+				newGetters[peer] = getterFactory(baseURL)
+				logger.Infof("为节点 %s 创建新的 HTTP getter (URL: %s)", peer, baseURL)
+			}
 		}
 	}
+
+	// 关闭不再使用的getter连接
+	for peer, getter := range h.nodeGetters {
+		if _, exists := newGetters[peer]; !exists {
+			// 如果是GRPCGetter，关闭连接
+			if grpcGetter, ok := getter.(*GRPCGetter); ok {
+				if err := grpcGetter.Close(); err != nil {
+					logger.Warnf("关闭gRPC连接失败 (节点 %s): %v", peer, err)
+				}
+			}
+		}
+	}
+
 	h.nodeGetters = newGetters
 }
 

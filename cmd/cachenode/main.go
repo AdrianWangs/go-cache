@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/AdrianWangs/go-cache/internal/cache"
+	"github.com/AdrianWangs/go-cache/internal/cachenode/grpc"
+	httpserver "github.com/AdrianWangs/go-cache/internal/cachenode/http"
 	"github.com/AdrianWangs/go-cache/internal/discovery"
 	"github.com/AdrianWangs/go-cache/internal/server"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
@@ -24,7 +26,8 @@ var (
 	etcdEndpoints = flag.String("etcd-endpoints", "localhost:2379", "etcd集群地址，多个用逗号分隔")
 	serviceName   = flag.String("service-name", "go-cache-nodes", "服务名称")
 	nodeHost      = flag.String("node-host", "", "本节点主机名或IP地址（留空则自动检测）")
-	nodePort      = flag.Int("node-port", 9090, "本节点监听端口")
+	nodePort      = flag.Int("node-port", 9090, "本节点gRPC监听端口")
+	httpPort      = flag.Int("http-port", 9091, "本节点HTTP监听端口")
 	apiAddr       = flag.String("api-addr", "localhost:8080", "API服务器地址")
 	cacheSize     = flag.Int64("cache-size", 1024*1024*64, "缓存大小 (bytes)")
 	groupName     = flag.String("group-name", "scores", "缓存组名称")
@@ -72,19 +75,23 @@ func main() {
 		}
 	}
 
-	nodeAddr := fmt.Sprintf("%s:%d", host, *nodePort)
+	// gRPC地址
+	grpcAddr := fmt.Sprintf("%s:%d", host, *nodePort)
+	// HTTP地址
+	httpAddr := fmt.Sprintf("%s:%d", host, *httpPort)
 
 	logger.Info("缓存节点启动中...")
 	logger.Infof("Etcd Endpoints: %v", endpoints)
 	logger.Infof("服务名称: %s", *serviceName)
-	logger.Infof("节点地址 (注册到etcd): %s", nodeAddr)
+	logger.Infof("节点gRPC地址: %s", grpcAddr)
+	logger.Infof("节点HTTP地址: %s", httpAddr)
 	logger.Infof("租约 TTL: %ds", *leaseTTL)
 	logger.Infof("API 服务器地址: %s", *apiAddr)
 	logger.Infof("缓存组名称: %s", *groupName)
 	logger.Infof("缓存大小: %d bytes", *cacheSize)
 
 	// 创建ServiceDiscovery实例
-	sd, err := discovery.NewServiceDiscovery(endpoints, *serviceName, nodeAddr, *leaseTTL)
+	sd, err := discovery.NewServiceDiscovery(endpoints, *serviceName, grpcAddr, *leaseTTL)
 	if err != nil {
 		logger.Fatalf("创建Service Discovery失败: %v", err)
 	}
@@ -106,9 +113,9 @@ func main() {
 		}
 	}()
 
-	logger.Infof("缓存节点 %s 已成功注册到etcd", nodeAddr)
+	logger.Infof("缓存节点 %s 已成功注册到etcd", grpcAddr)
 
-	// --- 新增：启动缓存逻辑 ---
+	// --- 创建缓存逻辑 ---
 	// 1. 创建缓存组
 	getter := cache.GetterFunc(func(key string) ([]byte, error) {
 		logger.Debugf("[本地数据源] 尝试获取 key: %s", key)
@@ -122,22 +129,28 @@ func main() {
 	group := cache.NewGroup(*groupName, *cacheSize, getter)
 
 	// 2. 创建 HTTP Pool，显式设置 Protobuf 协议
-	pool := server.NewHTTPPool(nodeAddr,
+	pool := server.NewHTTPPool(httpAddr,
 		server.WithProtocol(server.ProtocolProtobuf), // 明确指定 Protobuf 协议
 	)
 
 	// 3. 注册 PeerPicker
 	group.RegisterPeers(pool)
 
-	// 4. 启动 HTTP 服务 (监听缓存请求)
-	go func() {
-		logger.Infof("缓存 HTTP 服务正在监听 %s", nodeAddr)
-		if err := http.ListenAndServe(nodeAddr, pool); err != nil {
-			logger.Fatalf("无法启动缓存 HTTP 服务: %v", err)
-		}
-	}()
+	// 4. 创建和启动 gRPC 服务器
+	grpcServer := grpc.NewCacheServer(grpcAddr)
+	if err := grpcServer.Start(); err != nil {
+		logger.Fatalf("启动gRPC服务器失败: %v", err)
+	}
+	defer grpcServer.Stop()
 
-	// 5. 定期从 API Server 更新 Peer 列表
+	// 5. 创建和启动 HTTP 服务器 (提供API接口)
+	httpServer := httpserver.NewServer(httpAddr)
+	if err := httpServer.Start(); err != nil {
+		logger.Fatalf("启动HTTP服务器失败: %v", err)
+	}
+	defer httpServer.Stop()
+
+	// 6. 定期从 API Server 更新 Peer 列表
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // 确保在退出时停止更新goroutine
 
@@ -156,11 +169,7 @@ func main() {
 		}
 	}(ctx)
 
-	// --- 结束新增代码 ---
-
-	logger.Infof("缓存节点 %s 正在运行...", nodeAddr)
-	// 在这里可以启动该节点的实际缓存服务逻辑，例如监听端口等
-	// 为了演示，这里仅阻塞等待退出信号
+	logger.Infof("缓存节点已启动，提供 gRPC 服务于 %s 和 HTTP 服务于 %s", grpcAddr, httpAddr)
 
 	// 优雅关机处理
 	quit := make(chan os.Signal, 1)
@@ -174,7 +183,7 @@ func main() {
 	logger.Info("缓存节点已关闭")
 }
 
-// --- 新增：更新 Peer 列表的函数 ---
+// --- 更新 Peer 列表的函数 ---
 func updatePeers(pool *server.HTTPPool, apiAddr string) {
 	// 构建API地址
 	peerURL := fmt.Sprintf("http://%s/peers", apiAddr)
@@ -227,5 +236,3 @@ func updatePeers(pool *server.HTTPPool, apiAddr string) {
 		logger.Info("从 API Server 获取到空的 peer 列表")
 	}
 }
-
-// --- 结束新增函数 ---

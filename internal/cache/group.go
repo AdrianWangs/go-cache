@@ -159,3 +159,22 @@ func (g *Group) getFromPeerWithProto(peer peers.PeerGetter, key string) (ByteVie
 
 	return ByteView{bytes: res.Value}, nil
 }
+
+// GetGroups returns all registered cache groups
+func GetGroups() map[string]*Group {
+	mu.RLock()
+	defer mu.RUnlock()
+
+	// 创建一个副本
+	result := make(map[string]*Group, len(groups))
+	for k, v := range groups {
+		result[k] = v
+	}
+
+	return result
+}
+
+// Stats returns statistics for this cache group
+func (g *Group) Stats() CacheStats {
+	return g.mainCache.stats
+}

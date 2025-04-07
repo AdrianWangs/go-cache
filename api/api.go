@@ -16,11 +16,12 @@ import (
 
 // ApiServerConfig API服务器配置
 type ApiServerConfig struct {
-	EtcdEndpoints []string // Etcd服务地址
-	ServiceName   string   // 缓存节点服务名称
-	ApiPort       int      // API服务器端口
-	Replicas      int      // 虚拟节点倍数
-	BasePath      string   // 内部通信路径
+	EtcdEndpoints []string              // Etcd服务地址
+	ServiceName   string                // 缓存节点服务名称
+	ApiPort       int                   // API服务器端口
+	Replicas      int                   // 虚拟节点倍数
+	BasePath      string                // 内部通信路径
+	Protocol      handlers.ProtocolType // 通信协议类型
 }
 
 // ApiServer API服务器
@@ -47,17 +48,32 @@ func NewApiServer(config *ApiServerConfig) (*ApiServer, error) {
 		return nil, fmt.Errorf("创建服务发现失败: %v", err)
 	}
 
+	// 设置默认协议
+	if config.Protocol == "" {
+		config.Protocol = handlers.ProtocolHTTP
+	}
+
 	// 创建处理器
-	cacheHandler := handlers.NewCacheHandler(config.BasePath, config.Replicas)
+	cacheHandler := handlers.NewCacheHandler(config.BasePath, config.Replicas, handlers.CacheHandlerOptions{
+		Protocol: config.Protocol,
+	})
 	nodeHandler := handlers.NewNodeHandler()
 	metricsHandler := handlers.NewMetricsHandler()
 
 	// 设置节点变更回调
 	nodeHandler.SetServiceChangeHook(func(nodes []string) {
 		// 当节点列表变化时更新缓存处理器中的节点列表
-		cacheHandler.UpdatePeers(nodes, func(baseURL string) handlers.NodeGetter {
-			return handlers.NewHTTPGetter(baseURL)
-		})
+		if config.Protocol == handlers.ProtocolGRPC {
+			// 使用gRPC getter
+			cacheHandler.UpdatePeers(nodes, func(addr string) handlers.NodeGetter {
+				return handlers.NewGRPCGetter(addr)
+			})
+		} else {
+			// 使用HTTP getter
+			cacheHandler.UpdatePeers(nodes, func(baseURL string) handlers.NodeGetter {
+				return handlers.NewHTTPGetter(baseURL)
+			})
+		}
 	})
 
 	// 创建路由器
