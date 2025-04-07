@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/AdrianWangs/go-cache/internal/cache"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
 	pb "github.com/AdrianWangs/go-cache/proto/cache_server"
 	"google.golang.org/protobuf/proto"
@@ -59,7 +60,9 @@ func (h *HTTPGetter) Get(group string, key string) ([]byte, error) {
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode != http.StatusOK {
+	if res.StatusCode == http.StatusNotFound {
+		return nil, cache.ErrNotFound
+	} else if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("peer returned non-200 status: %v", res.Status)
 	}
 
@@ -99,7 +102,9 @@ func (h *HTTPGetter) GetByProto(req *pb.Request, resp *pb.Response) error {
 	defer httpResp.Body.Close()
 
 	// Check response status
-	if httpResp.StatusCode != http.StatusOK {
+	if httpResp.StatusCode == http.StatusNotFound {
+		return cache.ErrNotFound
+	} else if httpResp.StatusCode != http.StatusOK {
 		return fmt.Errorf("peer returned non-200 status: %v", httpResp.Status)
 	}
 

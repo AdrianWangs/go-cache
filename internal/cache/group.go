@@ -2,19 +2,12 @@ package cache
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/AdrianWangs/go-cache/internal/peers"
 	"github.com/AdrianWangs/go-cache/internal/singleflight"
 	"github.com/AdrianWangs/go-cache/pkg/logger"
 	pb "github.com/AdrianWangs/go-cache/proto/cache_server"
-)
-
-var (
-	// ErrKeyEmpty is returned when a key is empty
-	ErrKeyEmpty = errors.New("key is empty")
 )
 
 // Group is a cache namespace
@@ -63,7 +56,7 @@ func GetGroup(name string) *Group {
 // Get retrieves a key's value from the cache, loading it from the getter if needed
 func (g *Group) Get(key string) (ByteView, error) {
 	if key == "" {
-		return ByteView{}, ErrKeyEmpty
+		return ByteView{}, ErrEmptyKey
 	}
 
 	// Try local cache first
@@ -126,14 +119,20 @@ func (g *Group) load(key string) (value ByteView, err error) {
 }
 
 // getLocally loads key by calling the getter and stores it in the cache
-func (g *Group) getLocally(key string) (ByteView, error) {
+func (g *Group) getLocally(key string) (value ByteView, err error) {
 	bytes, err := g.getter.Get(key)
 	if err != nil {
 		logger.Errorf("[Cache] failed to get locally: %v", err)
-		return ByteView{}, fmt.Errorf("getter error: %w", err)
+		return ByteView{}, WrapError(ErrTypeInternalError, "getter error", err)
 	}
 
-	value := ByteView{bytes: cloneBytes(bytes)}
+	// 如果bytes为nil或长度为0，认为是key不存在
+	if bytes == nil || len(bytes) == 0 {
+		logger.Warnf("[Cache] key not found: %s", key)
+		return ByteView{}, ErrNotFound
+	}
+
+	value = ByteView{bytes: cloneBytes(bytes)}
 	g.populateCache(key, value)
 	return value, nil
 }

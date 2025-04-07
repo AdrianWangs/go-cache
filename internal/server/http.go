@@ -124,7 +124,14 @@ func (p *HTTPPool) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get the value
 	view, err := group.Get(key)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		if cache.IsKeyEmptyError(err) {
+			http.Error(w, "key is empty", http.StatusBadRequest)
+		} else if cache.IsKeyNotFoundError(err) {
+			http.Error(w, fmt.Sprintf("key '%s' not found", key), http.StatusNotFound)
+		} else {
+			logger.Errorf("获取数据错误: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -163,7 +170,14 @@ func (p *HTTPPool) handleProtobuf(w http.ResponseWriter, r *http.Request) {
 	// Get the value
 	view, err := group.Get(req.Key)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		if cache.IsKeyEmptyError(err) {
+			http.Error(w, "key is empty", http.StatusBadRequest)
+		} else if cache.IsKeyNotFoundError(err) {
+			http.Error(w, fmt.Sprintf("key '%s' not found", req.Key), http.StatusNotFound)
+		} else {
+			logger.Errorf("获取数据错误: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 
