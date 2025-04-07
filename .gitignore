@@ -5,3 +5,6 @@
 .pytest_cache
 .pytest_cache
 .cursor
+
+go.sum
+
